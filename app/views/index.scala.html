@@ -1,5 +1,17 @@
-@()
-
-@main("Welcome to Play") {
-  <h1>Welcome to Play!</h1>
+@main("File Upload") {
+    @helper.form(action = routes.HomeController.upload(), 'enctype -> "multipart/form-data") {
+        <input type="file" name="file">
+        <p>
+            <label for="token">token:</label>
+            <input type="text" name="token" id="token">
+        </p>
+        <label>
+            <input type="checkbox" name="private" id="private"/>
+        </label>private<br />
+        <p>
+            <input type="submit" value="Upload">
+        </p>
+    }
+    <p>Hint: upload files with curl:</p>
+    <pre>curl -F "file=@@&lt;file&gt;" -F "token=&lt;token&gt; https://up.helios.click"</pre>
 }
