@@ -23,3 +23,7 @@ libraryDependencies += "org.scalatestplus.play" %% "scalatestplus-play" % "2.0.0
 // play.sbt.routes.RoutesKeys.routesImport += "click.helios.binders._"
 
 enablePlugins(SbtNativePackager)
+
+import com.typesafe.sbt.packager.archetypes.ServerLoader
+
+serverLoading in Debian := ServerLoader.Systemd
