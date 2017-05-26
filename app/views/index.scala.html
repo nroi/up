@@ -1,5 +1,9 @@
+@import helper._
+
+@(implicit request: RequestHeader)
+
 @main("File Upload") {
-    @helper.form(action = routes.HomeController.upload(), 'enctype -> "multipart/form-data") {
+    @form(action = CSRF(routes.HomeController.upload()), 'enctype -> "multipart/form-data") {
         <input type="file" name="file">
         <p>
             <label for="token">token:</label>
