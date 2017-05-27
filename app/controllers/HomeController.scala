@@ -1,16 +1,15 @@
 package controllers
 
 import utils.Implicits._
-import java.io.{File, FileOutputStream}
+import java.io.FileOutputStream
 import java.math.BigInteger
 import java.nio.file.attribute.{GroupPrincipal, PosixFileAttributeView, PosixFileAttributes}
-import java.nio.file.{Files, LinkOption, Path, StandardWatchEventKinds}
+import java.nio.file.{Files, LinkOption, Path}
 import java.security.{MessageDigest, SecureRandom}
 import java.util.concurrent.ConcurrentLinkedQueue
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 import javax.inject._
 
+import org.apache.commons.codec.digest.HmacUtils
 import play.api._
 import play.api.mvc._
 
@@ -23,6 +22,21 @@ import scala.collection.JavaConversions._
 @Singleton
 class HomeController @Inject() extends Controller {
 
+  sealed trait AuthFailure {
+    val reason: String
+  }
+  object AuthStatus {
+    object InvalidHmac extends AuthFailure {
+      val reason: String = "Invalid HMAC"
+    }
+    object MissingHmac extends AuthFailure {
+      val reason: String = "No HMAC provided"
+    }
+    object MissingToken extends AuthFailure {
+      val reason: String = "No token provided"
+    }
+  }
+
   var presentations: Set[String] = {
     Option(Constants.PresentationDir.listFiles()) match {
       case None =>
@@ -32,46 +46,6 @@ class HomeController @Inject() extends Controller {
   }
 
   val tokenQueue = new ConcurrentLinkedQueue[String]()
-
-  new Thread(new Runnable {
-    val comDir = new File(Constants.HomeDir, "communicator")
-    val comFile = new File(comDir, "communicator")
-    override def run(): Unit = {
-      @annotation.tailrec
-      def waitToken(): String = {
-        val watcher = comDir.toPath.getFileSystem.newWatchService
-        comDir.toPath.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY)
-        val watchKey = watcher.take
-        val events = watchKey.pollEvents()
-        if (events.map(_.context).exists { case p: Path => p.endsWith("communicator") }) {
-          val source = scala.io.Source.fromFile(comFile)
-          val lines = try {
-            source.mkString
-          } finally {
-            source.close()
-          }
-          val token = lines.trim
-          if (token.nonEmpty) {
-            token
-          } else {
-            waitToken()
-          }
-        }
-        else {
-          waitToken()
-        }
-      }
-
-      while (true) {
-        val token = waitToken()
-        Logger.info(s"token: <$token>")
-        tokenQueue.add(token)
-        Logger.info(s"token added to Queue: ${tokenQueue.toList}")
-        // overwrite content
-        val _ = new FileOutputStream(comFile)
-      }
-    }
-  }).start()
 
   private val random = new SecureRandom()
 
@@ -127,6 +101,36 @@ class HomeController @Inject() extends Controller {
    */
   def index = Action { request =>
     Ok(views.html.index(request))
+  }
+
+  def newToken() = Action(parse.multipartFormData) { request =>
+    println("Attempt to POST new token.")
+    val maybeToken = request.body.dataParts.get("token").map {
+      case token +: Nil => token
+    }
+    val maybeHmac = request.body.dataParts.get("hmac").map {
+      case hmac +: Nil => hmac
+    }
+    println(s"$maybeToken $maybeHmac")
+    val authorizationStatus: Either[AuthFailure, String] = (maybeHmac, maybeToken) match {
+      case (None, _) => Left(AuthStatus.MissingHmac)
+      case (Some(_), None) => Left(AuthStatus.MissingToken)
+      case (Some(hmac), Some(token)) =>
+        val key = scala.io.Source.fromFile(Constants.Keyfile.getAbsolutePath).mkString.stripSuffix("\n")
+        val hexString = HmacUtils.hmacSha256Hex(key, token)
+        if (hexString == hmac) {
+          Right(token)
+        } else {
+          Left(AuthStatus.InvalidHmac)
+        }
+    }
+    authorizationStatus match {
+      case Right(token) =>
+        tokenQueue.add(token)
+        Ok("Token accepted.\n")
+      case Left(authFailure) =>
+        Forbidden(authFailure.reason + ".\n")
+    }
   }
 
   def upload() = Action(parse.multipartFormData) { request =>
