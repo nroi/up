@@ -7,12 +7,13 @@ import java.nio.file.attribute.{GroupPrincipal, PosixFileAttributeView, PosixFil
 import java.nio.file.{Files, LinkOption, Path, StandardWatchEventKinds}
 import java.security.{MessageDigest, SecureRandom}
 import java.util.concurrent.ConcurrentLinkedQueue
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import javax.inject._
 
 import play.api._
 import play.api.mvc._
 
-import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
 
 /**
@@ -22,18 +23,10 @@ import scala.collection.JavaConversions._
 @Singleton
 class HomeController @Inject() extends Controller {
 
-  //noinspection GetGetOrElse
-  val homeDir: String = System.getenv().asScala.get("HOME").getOrElse {
-    throw new IllegalStateException("$HOME directory not found.")
-  }
-
-  val hashDir = new File(homeDir, Constants.hashDirectory)
-
   var presentations: Set[String] = {
-    val presDir = new File(homeDir, Constants.directory)
-    Option(presDir.listFiles()) match {
+    Option(Constants.PresentationDir.listFiles()) match {
       case None =>
-        throw new IllegalStateException(s"Expected directory $presDir to exist.")
+        throw new IllegalStateException(s"Expected directory ${Constants.PresentationDir} to exist.")
       case Some(files) => files.map(_.getName).toSet
     }
   }
@@ -41,7 +34,7 @@ class HomeController @Inject() extends Controller {
   val tokenQueue = new ConcurrentLinkedQueue[String]()
 
   new Thread(new Runnable {
-    val comDir = new File(homeDir, "communicator")
+    val comDir = new File(Constants.HomeDir, "communicator")
     val comFile = new File(comDir, "communicator")
     override def run(): Unit = {
       @annotation.tailrec
@@ -125,9 +118,6 @@ class HomeController @Inject() extends Controller {
     }
   }
 
-  val filePath = new File(homeDir, Constants.directory)
-  Logger.logger.debug(s"storing files in ${filePath.toString}")
-
   /**
    * Create an Action to render an HTML page.
    *
@@ -149,12 +139,12 @@ class HomeController @Inject() extends Controller {
           val digest = generateDigest(bytes)
           val presNamePath: Path = {
             val presName = generatePresentationName(digest, file.filename)
-            new File(new File(homeDir, Constants.directory), presName).toPath
+            new File(Constants.PresentationDir, presName).toPath
           }
           val attrs: PosixFileAttributes = Files.getFileAttributeView(
-            filePath.toPath, classOf[PosixFileAttributeView]).readAttributes()
+            Constants.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
           val parentGroup: GroupPrincipal = attrs.group()
-          val movedFile = new File(hashDir, digest)
+          val movedFile = new File(Constants.HashDir, digest)
           movedFile.createNewFile()
           val out = new FileOutputStream(movedFile)
           val outBytes = Files.readAllBytes(file.ref.file.toPath)
@@ -169,7 +159,7 @@ class HomeController @Inject() extends Controller {
             // note: we assume that the linked directory is available through the web,
             // while parent directory of movedFile is not.
             Files.createSymbolicLink(presNamePath, movedFile.toPath)
-            Ok(s"${Constants.retrievalUrl}/${presNamePath.getFileName.toString}\n")
+            Ok(s"${Constants.RetrievalUrl}/${presNamePath.getFileName.toString}\n")
           }
           else {
             Ok("File has been uploaded.")
