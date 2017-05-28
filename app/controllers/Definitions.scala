@@ -23,4 +23,7 @@ object Definitions {
 
   // Were the symlinks are stored.
   val PresentationDir = new File(HomeDir, PresentationBasename)
+
+  // where uploads marked as private are stored.
+  val PrivateDir = new File(HomeDir, "private")
 }

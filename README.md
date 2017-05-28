@@ -46,7 +46,8 @@ process will fail since the application is not fully configured just yet.
 The Play! Framework needs an application secret for signing CSRF tokens. Change the value in `/etc/up/application.conf`
 accordingly, see the [Play! documentation](https://www.playframework.com/documentation/2.5.x/ApplicationSecret) for more details.
 Also, change the `play.filters.hosts` and `play.hostname` variable in the same file.
-Create the directories `/home/up/f` and `/home/up/hash`, the user `up` needs write access to both directories.
+Create the directories `/home/up/f`, `/home/up/private` and `/home/up/hash`, the user `up` needs
+write access to all those directories.
 
 Restart the application using systemd:
 ```

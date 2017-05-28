@@ -2,11 +2,11 @@ package controllers
 
 import utils.Implicits._
 import java.io.FileOutputStream
-import java.math.BigInteger
 import java.io.File
 import java.nio.file.attribute.{GroupPrincipal, PosixFileAttributeView, PosixFileAttributes}
 import java.nio.file.{Files, LinkOption, Path}
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject._
 
@@ -129,9 +129,11 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
     }
     authorizationStatus match {
       case Right(token) =>
+        Logger.debug("Token accepted.")
         tokenQueue.add(token)
         Ok("Token accepted.\n")
       case Left(authFailure) =>
+        Logger.debug(s"Token denied: ${authFailure.reason}.")
         Forbidden(authFailure.reason + ".\n")
     }
   }
@@ -141,28 +143,35 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
       case Some(token +: Nil) if tokenQueue contains token =>
         tokenQueue.remove(token)
         request.body.file("file").map { file =>
-          val bytes = Files.readAllBytes(file.ref.file.toPath)
-          val digest = DigestUtils.sha512Hex(bytes)
-          val presNamePath: Path = {
-            val presName = generatePresentationName(digest, file.filename)
-            new File(Definitions.PresentationDir, presName).toPath
-          }
-          val attrs: PosixFileAttributes = Files.getFileAttributeView(
-            Definitions.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
-          val parentGroup: GroupPrincipal = attrs.group()
-          val movedFile = new File(Definitions.HashDir, digest)
-          val alreadyExists = !movedFile.createNewFile()
-          if (!alreadyExists) {
-            val out = new FileOutputStream(movedFile)
-            out.write(bytes)
-            file.ref.file.delete()
-            Files.getFileAttributeView(
-              movedFile.toPath, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(parentGroup)
-          }
           val privateRequest = request.body.dataParts.get("private").exists(_.contains("on"))
           if (privateRequest) {
+            val dirName = {
+              val dirname = s"${Instant.now.toEpochMilli}"
+              val f = new File(Definitions.PrivateDir, dirname)
+              f.mkdirs()
+              f.getAbsolutePath
+            }
+            file.ref.moveTo(new File(dirName, file.filename))
             Ok("File has been uploaded.")
           } else {
+            val bytes = Files.readAllBytes(file.ref.file.toPath)
+            val digest = DigestUtils.sha512Hex(bytes)
+            val presNamePath: Path = {
+              val presName = generatePresentationName(digest, file.filename)
+              new File(Definitions.PresentationDir, presName).toPath
+            }
+            val attrs: PosixFileAttributes = Files.getFileAttributeView(
+              Definitions.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
+            val parentGroup: GroupPrincipal = attrs.group()
+            val movedFile = new File(Definitions.HashDir, digest)
+            val alreadyExists = !movedFile.createNewFile()
+            if (!alreadyExists) {
+              val out = new FileOutputStream(movedFile)
+              out.write(bytes)
+              file.ref.file.delete()
+              Files.getFileAttributeView(
+                movedFile.toPath, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(parentGroup)
+            }
             if (!alreadyExists) {
               Files.createSymbolicLink(presNamePath, movedFile.toPath)
             }
