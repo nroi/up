@@ -3,18 +3,18 @@ package controllers
 import utils.Implicits._
 import java.io.FileOutputStream
 import java.math.BigInteger
+import java.io.File
 import java.nio.file.attribute.{GroupPrincipal, PosixFileAttributeView, PosixFileAttributes}
 import java.nio.file.{Files, LinkOption, Path}
-import java.security.{MessageDigest, SecureRandom}
+import java.security.SecureRandom
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject._
 
-import org.apache.commons.codec.digest.HmacUtils
+import org.apache.commons.codec.digest.{DigestUtils, HmacUtils}
 import play.api._
 import play.api.mvc._
 
 import scala.collection.JavaConversions._
-
 import play.api.Configuration
 import javax.inject.Inject
 
@@ -53,16 +53,6 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
 
   private val random = new SecureRandom()
 
-  def generateRandomName: String = {
-    new BigInteger(20, random).toString(32)
-  }
-
-  def generateDigest(content: Array[Byte]): String = {
-    val md = MessageDigest.getInstance("SHA-512")
-    val hash = md.digest(content)
-    String.format("%064x", new java.math.BigInteger(1, hash))
-  }
-
   def generatePresentationName(digest: String, filename: String): String = {
     @annotation.tailrec
     def tryDigest(fullDigest: String, fileExtension: String, digestLength: Int): String = {
@@ -70,8 +60,17 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
         throw new IllegalArgumentException(s"Illegal digest length: $digestLength")
       }
       val partialDigest = fullDigest.substring(0, digestLength)
-      if (presentations.contains(partialDigest + fileExtension)) {
-        tryDigest(fullDigest, fileExtension, digestLength + 1)
+      val basename = partialDigest + fileExtension
+      if (presentations.contains(basename)) {
+        val digestFromSymlink = {
+          val presFile = new File(Definitions.PresentationDir, basename)
+          presFile.getCanonicalFile.getName
+        }
+        if (digestFromSymlink == digest) {
+          partialDigest
+        } else {
+          tryDigest(fullDigest, fileExtension, digestLength + 1)
+        }
       }
       else {
         partialDigest
@@ -109,14 +108,13 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
   }
 
   def newToken() = Action(parse.multipartFormData) { request =>
-    println("Attempt to POST new token.")
+    Logger.debug("Attempt to POST new token.")
     val maybeToken = request.body.dataParts.get("token").map {
       case token +: Nil => token
     }
     val maybeHmac = request.body.dataParts.get("hmac").map {
       case hmac +: Nil => hmac
     }
-    println(s"$maybeToken $maybeHmac")
     val authorizationStatus: Either[AuthFailure, String] = (maybeHmac, maybeToken) match {
       case (None, _) => Left(AuthStatus.MissingHmac)
       case (Some(_), None) => Left(AuthStatus.MissingToken)
@@ -143,9 +141,8 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
       case Some(token +: Nil) if tokenQueue contains token =>
         tokenQueue.remove(token)
         request.body.file("file").map { file =>
-          import java.io.File
           val bytes = Files.readAllBytes(file.ref.file.toPath)
-          val digest = generateDigest(bytes)
+          val digest = DigestUtils.sha512Hex(bytes)
           val presNamePath: Path = {
             val presName = generatePresentationName(digest, file.filename)
             new File(Definitions.PresentationDir, presName).toPath
@@ -154,24 +151,25 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
             Definitions.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
           val parentGroup: GroupPrincipal = attrs.group()
           val movedFile = new File(Definitions.HashDir, digest)
-          movedFile.createNewFile()
-          val out = new FileOutputStream(movedFile)
-          val outBytes = Files.readAllBytes(file.ref.file.toPath)
-          // TODO reading the bytes directly would be better than first creating a temporary file and then reading
-          // the bytes.
-          out.write(outBytes)
-          file.ref.file.delete()
-          Files.getFileAttributeView(
-            movedFile.toPath, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(parentGroup)
-          val privateRequest = request.body.dataParts.get("private").exists(_.contains("on"))
-          if (!privateRequest) {
-            // note: we assume that the linked directory is available through the web,
-            // while parent directory of movedFile is not.
-            Files.createSymbolicLink(presNamePath, movedFile.toPath)
-            Ok(s"${Definitions.retrievalUrl(configuration)}/${presNamePath.getFileName.toString}\n")
+          val alreadyExists = !movedFile.createNewFile()
+          if (!alreadyExists) {
+            val out = new FileOutputStream(movedFile)
+            val outBytes = Files.readAllBytes(file.ref.file.toPath)
+            // TODO reading the bytes directly would be better than first creating a temporary file and then reading
+            // the bytes.
+            out.write(outBytes)
+            file.ref.file.delete()
+            Files.getFileAttributeView(
+              movedFile.toPath, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(parentGroup)
           }
-          else {
+          val privateRequest = request.body.dataParts.get("private").exists(_.contains("on"))
+          if (privateRequest) {
             Ok("File has been uploaded.")
+          } else {
+            if (!alreadyExists) {
+              Files.createSymbolicLink(presNamePath, movedFile.toPath)
+            }
+            Ok(s"${Definitions.retrievalUrl(configuration)}/${presNamePath.getFileName.toString}\n")
           }
         }.getOrElse {
           UnprocessableEntity(views.html.error(UNPROCESSABLE_ENTITY, "No file provided."))
