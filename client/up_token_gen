@@ -1,0 +1,25 @@
+#!/bin/bash
+
+URL="https://up.helios.click"
+KEY_FILEPATH="$HOME/docs/sec/up_keyfile"
+
+TOKEN="$1"
+
+if [ -z "$TOKEN" ]; then
+    echo "Usage: $0 <token>"
+    exit 1
+fi
+
+if [ ! -f "$KEY_FILEPATH" ]; then
+    echo "The key file $KEY_FILEPATH does not exist."
+    exit 1
+fi
+
+command -v hmac256 >/dev/null 2>&1 || {
+    echo "hmac256 executable missing. Perhaps libgcrypt is not installed?"
+    exit 1
+}
+
+KEY="$(cat "$KEY_FILEPATH")"
+HMAC=$(echo -n "$TOKEN" | hmac256 "$KEY")
+curl -F token="$TOKEN" -F hmac="$HMAC" "$URL/new_token"
