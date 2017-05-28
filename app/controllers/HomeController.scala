@@ -154,10 +154,7 @@ class HomeController @Inject()(configuration: Configuration) extends Controller 
           val alreadyExists = !movedFile.createNewFile()
           if (!alreadyExists) {
             val out = new FileOutputStream(movedFile)
-            val outBytes = Files.readAllBytes(file.ref.file.toPath)
-            // TODO reading the bytes directly would be better than first creating a temporary file and then reading
-            // the bytes.
-            out.write(outBytes)
+            out.write(bytes)
             file.ref.file.delete()
             Files.getFileAttributeView(
               movedFile.toPath, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(parentGroup)
