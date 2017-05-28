@@ -15,12 +15,16 @@ import play.api.mvc._
 
 import scala.collection.JavaConversions._
 
+import play.api.Configuration
+import javax.inject.Inject
+
+
 /**
  * This controller creates an `Action` to handle HTTP requests to the
  * application's home page.
  */
 @Singleton
-class HomeController @Inject() extends Controller {
+class HomeController @Inject()(configuration: Configuration) extends Controller {
 
   sealed trait AuthFailure {
     val reason: String
@@ -38,9 +42,9 @@ class HomeController @Inject() extends Controller {
   }
 
   var presentations: Set[String] = {
-    Option(Constants.PresentationDir.listFiles()) match {
+    Option(Definitions.PresentationDir.listFiles()) match {
       case None =>
-        throw new IllegalStateException(s"Expected directory ${Constants.PresentationDir} to exist.")
+        throw new IllegalStateException(s"Expected directory ${Definitions.PresentationDir} to exist.")
       case Some(files) => files.map(_.getName).toSet
     }
   }
@@ -85,7 +89,7 @@ class HomeController @Inject() extends Controller {
     } else {
       None
     }
-    val digestString = tryDigest(digest, extension.getOrElse(""), Constants.MinDigestLength)
+    val digestString = tryDigest(digest, extension.getOrElse(""), Definitions.MinDigestLength)
     extension match {
       case Some(ext) => s"$digestString.$ext"
       case None => s"$digestString"
@@ -100,7 +104,8 @@ class HomeController @Inject() extends Controller {
    * a path of `/`.
    */
   def index = Action { request =>
-    Ok(views.html.index(request))
+    val hostname: String = Definitions.hostname(configuration)
+    Ok(views.html.index(hostname)(request))
   }
 
   def newToken() = Action(parse.multipartFormData) { request =>
@@ -116,7 +121,7 @@ class HomeController @Inject() extends Controller {
       case (None, _) => Left(AuthStatus.MissingHmac)
       case (Some(_), None) => Left(AuthStatus.MissingToken)
       case (Some(hmac), Some(token)) =>
-        val key = scala.io.Source.fromFile(Constants.Keyfile.getAbsolutePath).mkString.stripSuffix("\n")
+        val key = scala.io.Source.fromFile(Definitions.Keyfile.getAbsolutePath).mkString.stripSuffix("\n")
         val hexString = HmacUtils.hmacSha256Hex(key, token)
         if (hexString == hmac) {
           Right(token)
@@ -143,12 +148,12 @@ class HomeController @Inject() extends Controller {
           val digest = generateDigest(bytes)
           val presNamePath: Path = {
             val presName = generatePresentationName(digest, file.filename)
-            new File(Constants.PresentationDir, presName).toPath
+            new File(Definitions.PresentationDir, presName).toPath
           }
           val attrs: PosixFileAttributes = Files.getFileAttributeView(
-            Constants.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
+            Definitions.PresentationDir.toPath, classOf[PosixFileAttributeView]).readAttributes()
           val parentGroup: GroupPrincipal = attrs.group()
-          val movedFile = new File(Constants.HashDir, digest)
+          val movedFile = new File(Definitions.HashDir, digest)
           movedFile.createNewFile()
           val out = new FileOutputStream(movedFile)
           val outBytes = Files.readAllBytes(file.ref.file.toPath)
@@ -163,7 +168,7 @@ class HomeController @Inject() extends Controller {
             // note: we assume that the linked directory is available through the web,
             // while parent directory of movedFile is not.
             Files.createSymbolicLink(presNamePath, movedFile.toPath)
-            Ok(s"${Constants.RetrievalUrl}/${presNamePath.getFileName.toString}\n")
+            Ok(s"${Definitions.retrievalUrl(configuration)}/${presNamePath.getFileName.toString}\n")
           }
           else {
             Ok("File has been uploaded.")

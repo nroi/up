@@ -1,6 +1,6 @@
 @import helper._
 
-@(implicit request: RequestHeader)
+@(hostname: String)(implicit request: RequestHeader)
 
 @main("File Upload") {
     @form(action = CSRF(routes.HomeController.upload()), 'enctype -> "multipart/form-data") {
@@ -17,5 +17,5 @@
         </p>
     }
     <p>Hint: upload files with curl:</p>
-    <pre>curl -F "file=@@&lt;file&gt;" -F "token=&lt;token&gt; https://up.helios.click"</pre>
+    <pre>curl -F "file=@@&lt;file&gt;" -F "token=&lt;token&gt; https://@hostname"</pre>
 }
