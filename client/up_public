@@ -1,0 +1,31 @@
+#!/bin/bash
+
+URL="https://up.helios.click"
+
+FILENAME="$1"
+
+if [ -z "$FILENAME" ]; then
+    echo "Usage: $0 <filename>"
+    exit 1
+fi
+
+command -v up_token_gen >/dev/null 2>&1 || {
+    echo "hmac256 executable is missing. Perhaps libgcrypt is not installed?"
+    exit 1
+}
+
+command -v curl >/dev/null 2>&1 || {
+    echo "curl executable is missing."
+    exit 1
+}
+
+command -v openssl >/dev/null 2>&1 || {
+    echo "openssl executable is missing."
+    exit 1
+}
+
+TOKEN=$(openssl rand -hex 15)
+
+up_token_gen "$TOKEN"
+
+curl -F "file=@$FILENAME" -F "token=$TOKEN" "$URL"
